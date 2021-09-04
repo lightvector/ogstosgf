@@ -39,7 +39,7 @@ function showdiff() {
     shift
 
     echo "$GAMEID"
-    git --no-pager diff --word-diff=color --word-diff-regex='[a-zA-Z0-9]+|[^[:space:]]|[\xc0-\xff][\x80-\xbf]+' ogssgf/"$GAMEID".sgf ogsjson/"$GAMEID".sgf || true
+    git --no-pager diff --no-index --word-diff=color --word-diff-regex='[a-zA-Z0-9]+|[^[:space:]]|[\xc0-\xff][\x80-\xbf]+' ogssgf/"$GAMEID".sgf ogsjson/"$GAMEID".sgf || true
 }
 
 showdiff 36657373
