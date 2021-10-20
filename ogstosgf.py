@@ -6,12 +6,18 @@ import math
 import os
 import sys
 
+failure=False
+def warn(message):
+    global failure
+    failure = True
+    logging.warning(message)
+
 def get(ogsdata,field,default=None,logifnone=False):
   if field in ogsdata:
     return ogsdata[field]
   if logifnone:
     game_id = ogsdata["game_id"] if "game_id" in ogsdata else "Unknown"
-    logging.warning(f"Field not found for game {game_id}: {field}")
+    warn(f"Field not found for game {game_id}: {field}")
   return default
 
 def rankstr(rank):
@@ -38,9 +44,15 @@ def param(key,contents):
   return f"{key}[{contents}]"
 
 def construct_sgf(ogsdata):
+  global failure
+  failure = False
   out = ""
   out += "(;FF[4]CA[UTF-8]GM[1]"
   extra_info = []
+
+  original_sgf = get(ogsdata,"original_sgf")
+  if original_sgf is not None:
+    return original_sgf
 
   time = get(ogsdata,"start_time")
   if time is not None:
@@ -121,7 +133,7 @@ def construct_sgf(ogsdata):
     elif system == "none":
       pass
     else:
-      logging.warning(f"Unknown time control for game {game_id}: {system}")
+      warn(f"Unknown time control for game {game_id}: {system}")
 
     speed = get(time_control,"speed")
     if speed is not None:
@@ -144,7 +156,7 @@ def construct_sgf(ogsdata):
       elif winner == black_player_id:
         winner = "B"
       else:
-        logging.warning(f"Unknown winner for game {game_id}")
+        warn(f"Unknown winner for game {game_id}")
         winner = None
       if winner is not None:
         if outcome is not None and outcome.endswith(" points"):
@@ -153,10 +165,14 @@ def construct_sgf(ogsdata):
           out += param("RE",f"{winner}+R")
         elif outcome == "Timeout":
           out += param("RE",f"{winner}+T")
+        elif outcome == "Cancellation":
+          out += param("RE",f"{winner}+F")
+        elif outcome == "Disconnection":
+          out += param("RE",f"{winner}+F")
         elif outcome == "Moderator Decision":
           out += param("RE",f"{winner}+F")
         else:
-          logging.warning(f"Unknown outcome for game {game_id}")
+          warn(f"Unknown outcome for game {game_id}")
           out += param("RE","?")
       else:
         out += param("RE","?")
@@ -210,7 +226,7 @@ def construct_sgf(ogsdata):
     elif initial_player == "white":
       out += param("PL","W")
     else:
-      logging.warning(f"Unknown initial player for game {game_id}")
+      warn(f"Unknown initial player for game {game_id}")
       initial_player = "black"
   else:
     initial_player = "black"
@@ -252,7 +268,8 @@ def construct_sgf(ogsdata):
 
   out += ")"
   out += "\n"
-  return out
+  if not failure:
+    return out
 
 if __name__ == "__main__":
   logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', stream = sys.stdout, level=logging.INFO)
