@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 
 failure=False
@@ -12,13 +13,22 @@ def warn(message):
     failure = True
     logging.warning(message)
 
-def get(ogsdata,field,default=None,logifnone=False):
+def get(ogsdata, field, default=None, logifnone=False, game_id=None):
   if field in ogsdata:
     return ogsdata[field]
   if logifnone:
-    game_id = ogsdata["game_id"] if "game_id" in ogsdata else "Unknown"
-    warn(f"Field not found for game {game_id}: {field}")
+    game_id = game_id or ogsdata.get("game_id") or "Unknown"
+    warn(f"JSON field not found for game {game_id}: {field}")
   return default
+
+def get_sgf(game_id, sgf, field, default=None, logifnone=False):
+    m = re.search(field + '''\[([^][]+)\]''', sgf)
+    if m:
+        assert m.group(1)
+        return m.group(1)
+    if logifnone:
+        warn(f"SGF field not found for game {game_id or 'Unknown'}: {field}")
+    return default
 
 def rankstr(rank):
   # glicko -> kyudan
@@ -39,7 +49,7 @@ def sgfescape(s):
 
 sgfletters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-def param(key,contents):
+def param(key, contents):
   contents = sgfescape(str(contents))
   return f"{key}[{contents}]"
 
@@ -47,17 +57,8 @@ def construct_sgf(ogsdata):
   global failure
   failure = False
   out = ""
-  out += "(;FF[4]CA[UTF-8]GM[1]"
+  out += "(;FF[4]CA[UTF-8]GM[1]US[lightvector/ogstosgf.py]"
   extra_info = []
-
-  original_sgf = get(ogsdata,"original_sgf")
-  if original_sgf is not None:
-    return original_sgf
-
-  time = get(ogsdata,"start_time")
-  if time is not None:
-    date = datetime.datetime.utcfromtimestamp(time).strftime('%Y-%m-%d')
-    out += param("DT",date)
 
   game_id = get(ogsdata,"game_id",logifnone=True)
   if game_id is not None:
@@ -65,33 +66,54 @@ def construct_sgf(ogsdata):
   if game_id is None:
     game_id = "Unknown"
 
-  game_name = get(ogsdata,"game_name")
-  if game_name is not None:
-    out += param("GN",game_name)
+  time = get(ogsdata,"start_time")
+  if time is not None:
+    date = datetime.datetime.utcfromtimestamp(time)
+    strdate = date.strftime('%Y-%m-%d')
+    out += param("DT",strdate)
 
   players = get(ogsdata,"players",logifnone=True)
+  black_username = None
+  white_username = None
   if players is not None:
     black = get(players,"black",logifnone=True)
     white = get(players,"white",logifnone=True)
-    if black is not None:
-      username = get(black,"username",logifnone=True)
-      if username is not None:
-        out += param("PB",username)
+    if black is not None and len(black) > 0:
+      black_username = get(black,"username",logifnone=True,game_id=game_id)
+      if black_username is not None:
+        out += param("PB",black_username)
 
-    if white is not None:
-      username = get(white,"username",logifnone=True)
-      if username is not None:
-        out += param("PW",username)
+    if white is not None and len(white) > 0:
+      white_username = get(white,"username",logifnone=True,game_id=game_id)
+      if white_username is not None:
+        out += param("PW",white_username)
 
-    if black is not None:
-      rank = get(black,"rank",logifnone=True)
-      if rank is not None:
-        out += param("BR",rankstr(rank))
+    if black is not None and len(black) > 0:
+      black_rank = get(black,"rank",logifnone=False,game_id=game_id)
+      if black_rank is not None:
+        out += param("BR",rankstr(black_rank))
 
-    if white is not None:
-      rank = get(white,"rank",logifnone=True)
-      if rank is not None:
-        out += param("WR",rankstr(rank))
+    if white is not None and len(white) > 0:
+      white_rank = get(white,"rank",logifnone=False,game_id=game_id)
+      if white_rank is not None:
+        out += param("WR",rankstr(white_rank))
+
+  original_sgf = get(ogsdata,"original_sgf")
+  if original_sgf is not None:
+    strdate = get_sgf(game_id, original_sgf, "DT")
+    if strdate is not None:
+        try:
+            date = datetime.datetime.strptime(strdate, "%Y-%M-%d")
+        except ValueError:
+            pass
+
+    black_username = get_sgf(game_id, original_sgf, "PB") or black_username
+    white_username = get_sgf(game_id, original_sgf, "PW") or white_username
+    return True, (black_username, white_username, date, game_id), original_sgf
+
+  game_name = get(ogsdata,"game_name")
+  if game_name is not None:
+    out += param("GN",game_name)
 
   time_control = get(ogsdata,"time_control")
   if time_control is not None:
@@ -149,8 +171,12 @@ def construct_sgf(ogsdata):
     white_player_id = get(ogsdata,"white_player_id",logifnone=True)
     black_player_id = get(ogsdata,"black_player_id",logifnone=True)
     if outcome == "0 points":
-      out += param("RE","Jigo")
+      out += param("RE","Draw")
+    elif outcome and not winner:
+      out += param("RE","Void")
     else:
+      assert outcome
+      assert winner
       if winner == white_player_id:
         winner = "W"
       elif winner == black_player_id:
@@ -159,8 +185,10 @@ def construct_sgf(ogsdata):
         warn(f"Unknown winner for game {game_id}")
         winner = None
       if winner is not None:
-        if outcome is not None and outcome.endswith(" points"):
+        if outcome.endswith(" points"):
           out += param("RE",f"{winner}+{outcome[:-7]}")
+        elif outcome == "1 point":
+          out += param("RE",f"{winner}+1")
         elif outcome == "Resignation":
           out += param("RE",f"{winner}+R")
         elif outcome == "Timeout":
@@ -169,15 +197,16 @@ def construct_sgf(ogsdata):
           out += param("RE",f"{winner}+F")
         elif outcome == "Disconnection":
           out += param("RE",f"{winner}+F")
-        elif outcome == "Moderator Decision":
+        elif outcome in ("Moderator Decision", "Decision", "Disqualification","Ladder Withdrawn"):
           out += param("RE",f"{winner}+F")
         else:
-          warn(f"Unknown outcome for game {game_id}")
+          warn(f"Unknown outcome (with known winner) for game {game_id}")
           out += param("RE","?")
       else:
-        out += param("RE","?")
+          warn(f"Unknown outcome (with unknown winner) for game {game_id}")
+          out += param("RE","?")
   else:
-    out += param("RE","Unfinished")
+    out += param("RE","?") # Unfinished
 
   width = get(ogsdata,"width",default=19,logifnone=True)
   height = get(ogsdata,"height",default=19,logifnone=True)
@@ -268,8 +297,9 @@ def construct_sgf(ogsdata):
 
   out += ")"
   out += "\n"
+  #assert not failure, "Game {} failed to parse".format(game_id)
   if not failure:
-    return out
+    return False, (black_username, white_username, date, game_id), out
 
 if __name__ == "__main__":
   logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', stream = sys.stdout, level=logging.INFO)
