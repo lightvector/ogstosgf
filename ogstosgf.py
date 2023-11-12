@@ -7,11 +7,11 @@ import os
 import re
 import sys
 
-failure=False
+failure = False
 def warn(message):
-    global failure
-    failure = True
-    logging.warning(message)
+  global failure
+  failure = True
+  logging.warning(message)
 
 def get(ogsdata, field, default=None, logifnone=False, game_id=None):
   if field in ogsdata:
@@ -22,13 +22,62 @@ def get(ogsdata, field, default=None, logifnone=False, game_id=None):
   return default
 
 def get_sgf(game_id, sgf, field, default=None, logifnone=False):
-    m = re.search(field + '''\[([^][]+)\]''', sgf)
-    if m:
-        assert m.group(1)
-        return m.group(1)
-    if logifnone:
-        warn(f"SGF field not found for game {game_id or 'Unknown'}: {field}")
-    return default
+  m = re.search(field + '''\[([^][]+)\]''', sgf)
+  if m:
+    assert m.group(1)
+    return m.group(1)
+  if logifnone:
+    warn(f"SGF field not found for game {game_id or 'Unknown'}: {field}")
+  return default
+
+def get_handicap_coords(xSize, ySize, n):
+  xc = [0] * 3
+  yc = [0] * 3
+
+  if xSize != ySize or xSize < 9 or xSize % 2 != 1:
+    warn(f"Invalid board size for fixed handicap placement: {xSize=} {ySize=} {n=}")
+    failure = True
+    return []
+
+  if xSize <= 12:
+    xc[0] = 2
+    xc[1] = xSize-3
+    xc[2] = xSize//2
+  else:
+    xc[0] = 3
+    xc[1] = xSize-4
+    xc[2] = xSize//2
+
+  if ySize <= 12:
+    yc[0] = 2
+    yc[1] = ySize-3
+    yc[2] = ySize//2
+  else:
+    yc[0] = 3
+    yc[1] = ySize-4
+    yc[2] = ySize//2
+
+  if n == 2:
+    return [(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 3:
+    return [(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 4:
+    return [(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 5:
+    return [(xc[2],yc[2]),(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 6:
+    return [(xc[0],yc[2]),(xc[1],yc[2]),(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 7:
+    return [(xc[0],yc[2]),(xc[1],yc[2]),(xc[2],yc[2]),(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 8:
+    return [(xc[2],yc[0]),(xc[2],yc[1]),(xc[0],yc[2]),(xc[1],yc[2]),(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  elif n == 9:
+    return [(xc[2],yc[0]),(xc[2],yc[1]),(xc[0],yc[2]),(xc[1],yc[2]),(xc[2],yc[2]),(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+  else:
+    warn(f"Invalid handicap N for fixed handicap placement: {xSize=} {ySize=} {n=}")
+    failure = True
+    return []
+
 
 def rankstr(rank):
   # glicko -> kyudan
@@ -60,17 +109,21 @@ def construct_sgf(ogsdata):
   out += "(;FF[4]CA[UTF-8]GM[1]US[lightvector/ogstosgf.py]"
   extra_info = []
 
+  time = get(ogsdata,"start_time")
+  if time is not None:
+    date = datetime.datetime.utcfromtimestamp(time)
+    strdate = date.strftime('%Y-%m-%d')
+    out += param("DT",strdate)
+
   game_id = get(ogsdata,"game_id",logifnone=True)
   if game_id is not None:
     out += param("PC",f"OGS: https://online-go.com/game/{game_id}")
   if game_id is None:
     game_id = "Unknown"
 
-  time = get(ogsdata,"start_time")
-  if time is not None:
-    date = datetime.datetime.utcfromtimestamp(time)
-    strdate = date.strftime('%Y-%m-%d')
-    out += param("DT",strdate)
+  game_name = get(ogsdata,"game_name")
+  if game_name is not None:
+    out += param("GN",game_name)
 
   players = get(ogsdata,"players",logifnone=True)
   black_username = None
@@ -102,18 +155,14 @@ def construct_sgf(ogsdata):
   if original_sgf is not None:
     strdate = get_sgf(game_id, original_sgf, "DT")
     if strdate is not None:
-        try:
-            date = datetime.datetime.strptime(strdate, "%Y-%M-%d")
-        except ValueError:
-            pass
+      try:
+        date = datetime.datetime.strptime(strdate, "%Y-%M-%d")
+      except ValueError:
+        pass
 
     black_username = get_sgf(game_id, original_sgf, "PB") or black_username
     white_username = get_sgf(game_id, original_sgf, "PW") or white_username
     return True, (black_username, white_username, date, game_id), original_sgf
-
-  game_name = get(ogsdata,"game_name")
-  if game_name is not None:
-    out += param("GN",game_name)
 
   time_control = get(ogsdata,"time_control")
   if time_control is not None:
@@ -197,7 +246,7 @@ def construct_sgf(ogsdata):
           out += param("RE",f"{winner}+F")
         elif outcome == "Disconnection":
           out += param("RE",f"{winner}+F")
-        elif outcome in ("Moderator Decision", "Decision", "Disqualification","Ladder Withdrawn"):
+        elif outcome in ("Moderator Decision", "Decision", "Disqualification", "Ladder Withdrawn"):
           out += param("RE",f"{winner}+F")
         else:
           warn(f"Unknown outcome (with known winner) for game {game_id}")
@@ -239,6 +288,7 @@ def construct_sgf(ogsdata):
   handicap = get(ogsdata,"handicap",default=0)
   if handicap > 0:
     out += param("HA",handicap)
+  is_free_placement = get(ogsdata,"free_handicap_placement",default=False)
 
   ranked = get(ogsdata,"ranked",default=False,logifnone=True)
   if ranked:
@@ -273,11 +323,28 @@ def construct_sgf(ogsdata):
       for i in range(0, len(wstate), 2):
         out += "[" + wstate[i:i+2] + "]"
 
+    # if handicap > 0 and not is_free_placement:
+    #   tmp = ""
+    #   coords = get_handicap_coords(width,height,handicap)
+    #   if len(coords) > 0:
+    #     tmp += "AB"
+    #     for (x,y) in coords:
+    #       tmp += "[" + sgfletters[x] + sgfletters[y] + "]"
+    #   assert out.endswith(tmp), (out, tmp)
+
+  elif handicap > 0 and not is_free_placement:
+    coords = get_handicap_coords(width,height,handicap)
+    if len(coords) > 0:
+      out += "AB"
+      for (x,y) in coords:
+        out += "[" + sgfletters[x] + sgfletters[y] + "]"
+      initial_player = "white"
+
   moves = get(ogsdata,"moves",logifnone=True)
   if moves is not None:
     blacknext = True if initial_player == "black" else False
     for idx,data in enumerate(moves):
-      if idx < handicap:
+      if idx < handicap and is_free_placement:
         if idx == 0:
           out += "AB"
         out += "[" + sgfletters[data[0]] + sgfletters[data[1]] + "]"
@@ -320,7 +387,7 @@ if __name__ == "__main__":
           logging.info(f"{filename} -> {outfile}")
         with open(filename) as f:
           ogsdata = json.load(f)
-        sgf = construct_sgf(ogsdata)
+        _,_,sgf = construct_sgf(ogsdata)
         with open(outfile,"w") as f:
           f.write(sgf)
         num_processed += 1
