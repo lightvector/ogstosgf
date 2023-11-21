@@ -55,7 +55,14 @@ download 15225368 # 7h
 download 14675557 # 8h
 download 15337120 # 6h
 
-
+download 412553 # 2h
+download 262294 # 3h
+download 734652 # 3h
+download 1559 # 3h
+download 395518 # 3h
+download 1544 # 2h
+download 395828 # 2h
+download 630924 # 2h
 
 python3 ogstosgf.py ogsjson/ -verbose
 
@@ -99,6 +106,15 @@ showdiff 44827128 # 3h
 showdiff 15225368 # 7h
 showdiff 14675557 # 8h
 showdiff 15337120 # 6h
+
+showdiff 412553 # 2h
+showdiff 262294 # 3h
+showdiff 734652 # 3h
+showdiff 1559 # 3h
+showdiff 395518 # 3h
+showdiff 1544 # 2h
+showdiff 395828 # 2h
+showdiff 630924 # 2h
 
 exit 0
 }

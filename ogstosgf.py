@@ -30,7 +30,7 @@ def get_sgf(game_id, sgf, field, default=None, logifnone=False):
     warn(f"SGF field not found for game {game_id or 'Unknown'}: {field}")
   return default
 
-def get_handicap_coords(xSize, ySize, n):
+def get_handicap_coords(xSize, ySize, n, ogs_import):
   xc = [0] * 3
   yc = [0] * 3
 
@@ -58,9 +58,15 @@ def get_handicap_coords(xSize, ySize, n):
     yc[2] = ySize//2
 
   if n == 2:
-    return [(xc[1],yc[0]),(xc[0],yc[1])]
+    if ogs_import:
+      return [(xc[0],yc[0]),(xc[1],yc[1])]
+    else:
+      return [(xc[1],yc[0]),(xc[0],yc[1])]
   elif n == 3:
-    return [(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
+    if ogs_import:
+      return [(xc[0],yc[0]),(xc[1],yc[0]),(xc[1],yc[1])]
+    else:
+      return [(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
   elif n == 4:
     return [(xc[0],yc[0]),(xc[1],yc[1]),(xc[1],yc[0]),(xc[0],yc[1])]
   elif n == 5:
@@ -311,6 +317,7 @@ def construct_sgf(ogsdata):
     initial_player = "black"
 
   initial_state = get(ogsdata,"initial_state")
+  ogs_import = get(ogsdata,"ogs_import",default=False)
   if initial_state is not None:
     bstate = get(initial_state,"black",logifnone=True)
     wstate = get(initial_state,"white",logifnone=True)
@@ -333,7 +340,7 @@ def construct_sgf(ogsdata):
     #   assert out.endswith(tmp), (out, tmp)
 
   elif handicap > 0 and not is_free_placement:
-    coords = get_handicap_coords(width,height,handicap)
+    coords = get_handicap_coords(width,height,handicap,ogs_import)
     if len(coords) > 0:
       out += "AB"
       for (x,y) in coords:
